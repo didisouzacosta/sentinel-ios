@@ -18,7 +18,7 @@ escopo explícito.
 ## Baseline efetiva
 
 - Plataforma e versão mínima: iOS 15. macOS 12 declarado só para `swift test` no Mac.
-- Projeto/workspace: `Package.swift` na raiz (SPM). O app de exemplo fica em `Example/` (S4).
+- Projeto/workspace: `Package.swift` na raiz (SPM). O app de exemplo fica em `Example/` (`SentinelExample.xcodeproj`, gerado por `xcodegen` a partir de `Example/project.yml`).
 - Schemes ou targets: `SentinelKit` (biblioteca) e `SentinelKitTests` (Swift Testing).
 - Linguagem e versão: Swift 6 (`swiftLanguageModes: [.v6]`, concorrência estrita), toolchain Swift 6.4 / Xcode 27.
 - Dependências permitidas: nenhuma. Só Foundation e os frameworks da Apple (MetricKit e UIKit quando disponível).
@@ -55,7 +55,8 @@ dependências, navegação, persistência e integrações externas.
 ## Estado, concorrência e efeitos
 
 - Fonte de verdade de cada estado: o escopo (usuário, tags, breadcrumbs) num `actor` (S2). Os modelos são valores imutáveis.
-- Isolamento de atores e tarefas: nada de `@MainActor` no SDK, exceto ao ler `UIDevice`. Nada de `Task.detached`, `@unchecked Sendable` ou `nonisolated(unsafe)`.
+- Isolamento de atores e tarefas: nada de `@MainActor` no SDK, exceto ao ler `UIDevice` e no tempo de segundo plano (`BackgroundTaskRunning`, `BackgroundTime`, `UIKitBackgroundTasks`), porque `UIApplication` só pode ser usado no main actor. Nada de `Task.detached` ou `nonisolated(unsafe)`; `@unchecked Sendable` só no `CrashSnapshotStore` (documentado no brief).
+- Extensões de app: o SDK não pode citar API indisponível em extensões (`UIApplication.shared` e afins), senão quebra o build de widgets e extensões que o usem. Confira com `swiftc -typecheck -application-extension` (comando em "Testes e validação").
 - Cancelamento: o envio aceita cancelamento e um envelope cancelado continua em disco.
 - Limites: no máximo 50 breadcrumbs e 10 envelopes em disco (o mais antigo é reciclado).
 - Permissões, rede, arquivos e outros efeitos: só rede para o host do DSN, e só com consentimento quando `consent == .required`; arquivos em `Caches/SentinelKit/`; conectividade observada por `NWPathMonitor`.
@@ -105,12 +106,14 @@ Registre comandos e resultados reais. Separe compilação e Simulator de
 validação em dispositivo físico e de serviços externos.
 
 - Testes unitários: `swift test`.
-- Testes de integração (S4): `SENTINEL_DSN=… swift test --filter Integration`, contra o `wrangler dev` do sentinel-lab.
+- Teste contra servidor real: `SENTINEL_DSN=… SENTINEL_API_TOKEN=… swift test --filter LiveServer`, contra o `wrangler dev` do sentinel-lab (pulado sem `SENTINEL_DSN`).
+- App de exemplo (build e testes do view model): `xcodebuild test -project Example/SentinelExample.xcodeproj -scheme SentinelExample -destination 'platform=iOS Simulator,name=iPhone 17'`.
+- Segurança em extensões: `xcrun -sdk iphonesimulator swiftc -typecheck -parse-as-library -module-name SentinelKit -swift-version 6 -application-extension -target arm64-apple-ios15.0-simulator $(find Sources -name '*.swift')` deve terminar sem erros.
 - Build e simulador: `xcodebuild test -scheme SentinelKit -destination 'platform=iOS Simulator,name=iPhone 17'`.
 - Lint: `scripts/lint-swift.sh --fix` e depois `scripts/lint-swift.sh`.
 - Dispositivo físico: crashes do MetricKit (S3).
 - Serviços live: produção em https://sentinel.adrianosouzacosta.com.br.
-- Validações ainda não executadas: S2–S4.
+- Validações ainda não executadas: MetricKit em iPhone físico, runtime iOS 15 e envio contra produção (detalhes no brief).
 
 ## Entrega
 

@@ -12,9 +12,8 @@ Só Swift, sem dependências, iOS 15+.
 | Modo de linguagem | O pacote compila em Swift 6 com concorrência estrita. O seu app pode continuar no modo Swift 5, desde que use um compilador Swift 6 (Xcode 16+). |
 | Dependências | Nenhuma. Só Swift, sem Objective-C. |
 
-> **Status:** em construção, ainda sem versão publicada (use a branch `main`). Prontos: início, captura de erros e
-> mensagens, breadcrumbs, parâmetros personalizados, consentimento, fila offline e crashes. O app de exemplo e a
-> versão 0.1.0 chegam na etapa 4.
+> **Versão atual:** 0.1.0 (veja o [CHANGELOG](CHANGELOG.md)). A API pode mudar até a 1.0; mudanças entram no
+> CHANGELOG.
 
 ## 1. Pegue o DSN do projeto
 
@@ -77,6 +76,24 @@ Sentinel.grantConsent()
 
 Rode o app, chame `Sentinel.grantConsent()`, dispare `Sentinel.capture(message: "Teste do SentinelKit")` e abra
 **Issues** no Sentinel. O evento aparece em segundos.
+
+## App de exemplo
+
+`Example/SentinelExample.xcodeproj` é um app SwiftUI (iOS 17+) que usa o pacote local e tem um botão para cada
+recurso: consentimento, breadcrumb, parâmetro personalizado, erro, mensagem, envio da fila e os dois tipos de crash.
+
+1. Abra o projeto no Xcode e rode no simulador.
+2. Cole o DSN no campo e toque em **Start SentinelKit**. Ele fica salvo e, nas próximas aberturas, o SDK já inicia
+   no `init()` do app (é assim que o crash da abertura anterior é enviado). **Forget DSN** apaga o DSN salvo; feche e
+   abra o app para informar outro.
+3. Toque em **Grant consent** e depois em **Capture error**: a issue aparece no Sentinel.
+4. **Crash: NSException** derruba o app; abra-o de novo e o crash chega ao Sentinel. **Crash: fatalError** só é
+   reportado pelo MetricKit, num iPhone de verdade.
+
+Para um Sentinel local (`wrangler dev`), use `http://<chave>@127.0.0.1:8787/<id>`: o app de exemplo já libera
+`NSAllowsLocalNetworking`. O projeto é gerado pelo [XcodeGen](https://github.com/yonaskolb/XcodeGen) a partir de
+`Example/project.yml`; depois de mudar esse arquivo, rode `xcodegen` dentro de `Example/`. O app fala com o SDK por um
+protocolo (`SentinelService`), então as previews e os testes do view model nunca chegam ao SDK de verdade.
 
 ## Privacidade (GDPR)
 
@@ -170,8 +187,15 @@ entende esse formato, então nada precisa mudar nele. O SDK não usa nenhuma bib
 - Ferramentas usadas no desenvolvimento: Xcode 27 / Swift 6.4 (o pacote exige no mínimo Swift 6.0).
 - Testes: `swift test`, ou no simulador com
   `xcodebuild test -scheme SentinelKit -destination 'platform=iOS Simulator,name=iPhone 17'`.
+- Teste contra um Sentinel de verdade (opcional; sem as variáveis ele é pulado):
+  `SENTINEL_DSN="http://<chave>@127.0.0.1:8787/<id>" SENTINEL_API_TOKEN="wst_…" swift test --filter LiveServer`.
+  Ele envia um evento montado pelo SDK e, com o token, confirma pela `/api/0` que o servidor o encontrou.
+- App de exemplo e testes do view model:
+  `xcodebuild test -project Example/SentinelExample.xcodeproj -scheme SentinelExample -destination 'platform=iOS Simulator,name=iPhone 17'`.
 - Lint (obrigatório): `scripts/lint-swift.sh --fix` e depois `scripts/lint-swift.sh`.
 - Regras para pessoas e agentes: [AGENTS.md](AGENTS.md), com o brief e o guia em `.ai/`.
 - O arquivo `Tests/SentinelKitTests/Fixtures/handled-error.envelope` é o contrato com o servidor: o Sentinel aceita
   esse envelope exatamente como está. Se o formato mudar, regrave com `RECORD_FIXTURES=1 swift test --filter contractFixture`
-  e valide de novo contra o servidor.
+  e valide de novo contra o servidor. O sentinel-lab tem uma cópia idêntica em
+  `packages/workers-sentinel/test/fixtures/sentinelkit-handled-error.envelope`, testada em `sentinelkit-contract.test.ts`:
+  mude as duas juntas.

@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(UIKit)
-    import UIKit
-#endif
 
 /// Turns the synchronous public API into ordered work for the engine.
 ///
@@ -193,14 +190,18 @@ final class SentinelHub: Sendable {
             }
         }
 
-        #if canImport(UIKit)
-            for name in [UIApplication.didEnterBackgroundNotification, UIApplication.didBecomeActiveNotification] {
-                Task {
-                    for await _ in NotificationCenter.default.notifications(named: name).map({ _ in () }) {
-                        hub.send(.triggerFlush)
+        #if canImport(UIKit) && os(iOS)
+            LifecycleObserver.observe(
+                .live,
+                flush: {
+                    await withCheckedContinuation { continuation in
+                        hub.send(.flush(continuation))
                     }
+                },
+                triggerFlush: {
+                    hub.send(.triggerFlush)
                 }
-            }
+            )
         #endif
 
         return observers
