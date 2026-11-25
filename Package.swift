@@ -13,7 +13,10 @@ let package = Package(
         .library(name: "SentinelKit", targets: ["SentinelKit"]),
     ],
     targets: [
-        .target(name: "SentinelKit"),
+        .target(
+            name: "SentinelKit",
+            resources: [.copy("Resources/PrivacyInfo.xcprivacy")]
+        ),
         .testTarget(
             name: "SentinelKitTests",
             dependencies: ["SentinelKit"],

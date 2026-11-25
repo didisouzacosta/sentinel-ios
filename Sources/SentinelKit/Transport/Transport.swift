@@ -38,12 +38,15 @@ struct Transport: Sendable {
     /// Sends one envelope. Network failures become `.retryLater` and are never thrown; what is thrown is
     /// cancellation (`CancellationError`) or an envelope that cannot be encoded.
     func send(_ envelope: Envelope) async throws -> TransportResult {
-        let request = try makeRequest(for: envelope)
+        try await send(encoded: encoder.encode(envelope))
+    }
 
+    /// Sends an envelope already encoded, as stored in the offline queue.
+    func send(encoded body: Data) async throws -> TransportResult {
         let response: HTTPResponse
 
         do {
-            response = try await client.send(request)
+            response = try await client.send(makeRequest(body: body))
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch is CancellationError {
@@ -57,10 +60,10 @@ struct Transport: Sendable {
 
     // MARK: - Private Methods
 
-    private func makeRequest(for envelope: Envelope) throws -> URLRequest {
+    private func makeRequest(body: Data) -> URLRequest {
         var request = URLRequest(url: dsn.envelopeURL)
         request.httpMethod = "POST"
-        request.httpBody = try encoder.encode(envelope)
+        request.httpBody = body
         request.setValue("application/x-sentry-envelope", forHTTPHeaderField: "Content-Type")
         request.setValue(
             "Sentry sentry_version=7, sentry_client=\(sdk.name)/\(sdk.version), sentry_key=\(dsn.publicKey)",

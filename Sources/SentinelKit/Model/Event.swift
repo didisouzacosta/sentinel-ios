@@ -33,6 +33,8 @@ struct Event: Sendable, Encodable {
 
     var breadcrumbs: [Breadcrumb]?
 
+    var contexts: Contexts?
+
     var fingerprint: [String]?
 
     var sdk: SDKInfo
@@ -70,6 +72,7 @@ struct Event: Sendable, Encodable {
         case dist
         case tags
         case breadcrumbs
+        case contexts
         case fingerprint
         case sdk
     }

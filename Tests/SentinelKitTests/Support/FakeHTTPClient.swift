@@ -6,13 +6,20 @@ actor FakeHTTPClient: HTTPClient {
 
     // MARK: - Properties
 
-    private let reply: Reply
+    private var reply: Reply
 
     private(set) var requests: [URLRequest] = []
 
     // MARK: - Initializer
 
     init(_ reply: Reply) {
+        self.reply = reply
+    }
+
+    // MARK: - Methods
+
+    /// Changes the answer for the next requests (for example, the network coming back).
+    func setReply(_ reply: Reply) {
         self.reply = reply
     }
 

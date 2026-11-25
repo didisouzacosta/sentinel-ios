@@ -3,8 +3,18 @@
 Envia erros, mensagens e crashes do seu app iOS para o [Sentinel Lab](https://sentinel.adrianosouzacosta.com.br).
 Só Swift, sem dependências, iOS 15+.
 
-> **Status:** em construção. A etapa 1 de 4 está pronta: modelo do evento, DSN, envelope e envio.
-> `Sentinel.start` e a captura chegam na etapa 2, e os crashes na etapa 3. A versão 0.1.0 sai na etapa 4.
+## Requisitos
+
+| | |
+|---|---|
+| Plataforma | iOS 15 ou superior |
+| Swift | 6.0 ou superior (`swift-tools-version: 6.0`): Xcode 16 ou mais novo |
+| Modo de linguagem | O pacote compila em Swift 6 com concorrência estrita. O seu app pode continuar no modo Swift 5, desde que use um compilador Swift 6 (Xcode 16+). |
+| Dependências | Nenhuma. Só Swift, sem Objective-C. |
+
+> **Status:** em construção, ainda sem versão publicada (use a branch `main`). Prontos: início, captura de erros e
+> mensagens, breadcrumbs, parâmetros personalizados, consentimento e fila offline. Os crashes chegam na etapa 3 e a
+> versão 0.1.0 na etapa 4.
 
 ## 1. Pegue o DSN do projeto
 
@@ -79,12 +89,27 @@ Rode o app, chame `Sentinel.grantConsent()`, dispare `Sentinel.capture(message: 
   - não há campo de usuário;
   - o SDK não coleta nome do aparelho, IP, IDFA nem IDFV.
 - **Identificar alguém é opção sua:** use `Sentinel.setCustom("chave", "valor")`, de preferência com um identificador interno e não com e-mail ou nome. Também não coloque dados pessoais em mensagens e breadcrumbs.
+  Se você enviar um identificador do usuário, os dados passam a ser "ligados à identidade": declare isso no manifesto de privacidade e na ficha de privacidade do **seu** app.
 - **Manifesto da Apple:** o pacote traz `PrivacyInfo.xcprivacy` declarando dados de diagnóstico, não ligados à identidade e sem rastreamento.
 
 ## Offline
 
 - **Fila:** sem rede, os eventos e crashes ficam numa fila no aparelho com no máximo **10**; a partir daí o mais antigo é reciclado.
-- **Envio:** a fila é enviada ao abrir o app, quando a rede volta e depois de cada nova captura. Cada evento aceito pelo Sentinel é apagado do aparelho.
+- **Envio:** a fila é enviada ao abrir o app, quando a rede volta, quando o app vai para o segundo plano ou volta dele, e depois de cada nova captura. Cada evento aceito pelo Sentinel é apagado do aparelho.
+- **Falhas:** sem resposta do servidor, o SDK espera 30 s, depois 60 s e assim por diante, até 1 hora, e tenta de novo sozinho. Se o Sentinel pedir para esperar (`Retry-After`), ele respeita esse prazo.
+
+## Declarações para a Apple
+
+O SDK não pede permissão nem chave nova no `Info.plist` do seu app.
+
+| Item | O que fazer |
+|---|---|
+| Manifesto de privacidade | Nada: o `PrivacyInfo.xcprivacy` do SentinelKit entra sozinho no relatório de privacidade do app. Ele declara dados de crash e outros diagnósticos, não ligados à identidade e sem rastreamento, e o uso de `UserDefaults` (motivo `CA92.1`), onde fica a decisão de consentimento. |
+| Ficha de privacidade (App Store Connect) | No **seu** app, marque "Crash Data" e "Other Diagnostic Data" como *não ligados ao usuário*, finalidade *App Functionality*. Se enviar um identificador do usuário com `setCustom`, marque como *ligados*. |
+| App Tracking Transparency | Não se aplica: o SDK não rastreia nem usa IDFA. |
+| Background Modes, entitlements, App Intents | Não são necessários. |
+| Criptografia (export compliance) | Nada muda: o envio usa HTTPS do sistema, que é isento. |
+| Só em desenvolvimento | Com DSN `http://` (Sentinel local), libere `NSAllowsLocalNetworking` em `NSAppTransportSecurity`. Num iPhone físico apontando para o IP do seu Mac, o iOS pede acesso à rede local: adicione `NSLocalNetworkUsageDescription`. Não leve isso para a versão da loja. |
 
 ## Peça para a sua IA integrar
 
@@ -127,7 +152,7 @@ entende esse formato, então nada precisa mudar nele. O SDK não usa nenhuma bib
 
 ## Desenvolvimento
 
-- Requisitos: Xcode 27 / Swift 6.
+- Ferramentas usadas no desenvolvimento: Xcode 27 / Swift 6.4 (o pacote exige no mínimo Swift 6.0).
 - Testes: `swift test`, ou no simulador com
   `xcodebuild test -scheme SentinelKit -destination 'platform=iOS Simulator,name=iPhone 17'`.
 - Lint (obrigatório): `scripts/lint-swift.sh --fix` e depois `scripts/lint-swift.sh`.
