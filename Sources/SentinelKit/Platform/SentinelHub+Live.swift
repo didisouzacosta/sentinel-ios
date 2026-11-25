@@ -24,7 +24,9 @@ extension SentinelHub {
             store: store,
             consentStore: consentStore,
             contexts: ContextProvider.contexts(app: AppInfo(bundle: .main)),
-            stackTraceBuilder: .app
+            stackTraceBuilder: .app,
+            appBinaryName: Bundle.main.object(forInfoDictionaryKey: "CFBundleExecutable") as? String,
+            crashSnapshots: ExceptionCrashHandler.snapshots
         )
     }
 }

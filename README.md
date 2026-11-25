@@ -13,8 +13,8 @@ Só Swift, sem dependências, iOS 15+.
 | Dependências | Nenhuma. Só Swift, sem Objective-C. |
 
 > **Status:** em construção, ainda sem versão publicada (use a branch `main`). Prontos: início, captura de erros e
-> mensagens, breadcrumbs, parâmetros personalizados, consentimento e fila offline. Os crashes chegam na etapa 3 e a
-> versão 0.1.0 na etapa 4.
+> mensagens, breadcrumbs, parâmetros personalizados, consentimento, fila offline e crashes. O app de exemplo e a
+> versão 0.1.0 chegam na etapa 4.
 
 ## 1. Pegue o DSN do projeto
 
@@ -91,6 +91,21 @@ Rode o app, chame `Sentinel.grantConsent()`, dispare `Sentinel.capture(message: 
 - **Identificar alguém é opção sua:** use `Sentinel.setCustom("chave", "valor")`, de preferência com um identificador interno e não com e-mail ou nome. Também não coloque dados pessoais em mensagens e breadcrumbs.
   Se você enviar um identificador do usuário, os dados passam a ser "ligados à identidade": declare isso no manifesto de privacidade e na ficha de privacidade do **seu** app.
 - **Manifesto da Apple:** o pacote traz `PrivacyInfo.xcprivacy` declarando dados de diagnóstico, não ligados à identidade e sem rastreamento.
+
+## Crashes
+
+Não há nada a configurar: `Sentinel.start` liga a captura.
+
+| Tipo | Como chega | O que traz |
+|---|---|---|
+| Exceção Objective-C não tratada (`NSException`, por exemplo índice fora do array em código Foundation) | Gravada no aparelho no momento do crash e enviada na abertura seguinte. O handler que o app já tinha continua sendo chamado. | Tipo e motivo da exceção, stack com nomes de função, breadcrumbs e parâmetros personalizados. |
+| Crash nativo: `fatalError`, force unwrap de `nil`, índice fora do array em Swift, acesso inválido à memória | O iOS entrega o relatório pelo MetricKit numa abertura seguinte. | Exceção e sinal (`EXC_BAD_ACCESS`/`SIGSEGV`, `EXC_BREAKPOINT`/`SIGTRAP`…), endereços e o UUID de cada binário (`debug_meta`), prontos para simbolização. Breadcrumbs da sessão que caiu não estão disponíveis. |
+
+- **Duplicatas:** quando o SDK grava uma exceção, ele anota a hora. O relatório do MetricKit da mesma janela é reconhecido e ignorado uma vez, e a anotação expira em 7 dias. Se o handler não chegou a gravar (crash antes do `Sentinel.start`, por exemplo), o MetricKit reporta a exceção com nome e mensagem.
+- **Nomes de função:** nas exceções, vêm do próprio aparelho e podem ser aproximados em builds de release sem símbolos. Nos crashes nativos ainda não há nomes: o Sentinel ainda não simboliza, então esses frames mostram binário e endereço.
+- **Handler anterior:** o SDK chama o handler de exceções que já estava instalado antes do `Sentinel.start`. Um handler instalado depois substitui o do SDK.
+- **Onde testar:** o MetricKit só entrega relatórios num iPhone de verdade, não no simulador. Com o aparelho conectado, *Debug → Simulate MetricKit Payloads* no Xcode gera um de teste.
+- **Dados do crash nativo:** a versão do app, do sistema e o modelo do aparelho são os do momento do crash, não os da abertura atual.
 
 ## Offline
 

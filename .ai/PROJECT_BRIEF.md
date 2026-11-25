@@ -32,8 +32,8 @@
 - Recursos disponíveis:
   - S1: modelo do evento, DSN, codificação do envelope e transporte;
   - S2: fachada `Sentinel` (`start`, `capture`, `addBreadcrumb`, `setCustom`, `grantConsent`, `revokeConsent` e `flush`), fila ordenada de comandos, contextos de app, sistema e aparelho, stack trace resolvido no aparelho, fila offline de 10, envio em segundo plano com backoff, retomada quando a rede volta e no ciclo de vida do app, e `PrivacyInfo.xcprivacy`.
+  - S3: crashes por `NSException` (handler gravando em disco de forma síncrona, com breadcrumbs, encadeando o handler anterior) e pelo MetricKit (`MXCrashDiagnostic` com `debug_meta` e UUIDs), deduplicados dentro da janela do payload;
 - Recursos planejados, ainda não conectados:
-  - S3: crashes (`NSException` e MetricKit) e `debug_meta` com os UUIDs das imagens;
   - S4: app de exemplo, teste ponta a ponta e versão 0.1.0.
 - Limites conhecidos do servidor, que o SDK respeita:
   - `message` em texto simples;
@@ -94,7 +94,14 @@ Regras definidas pelo dono em 25/11/2026:
   - `swift test` e `xcodebuild test` (iPhone 17, iOS 27.2) com 75 testes em 15 suítes, incluindo os de concorrência (revogar durante um envio, flush que não trava a fila, consentimento antes do `start`);
   - lint sem nenhuma violação, e build sem avisos no Mac e no simulador;
   - `plutil -lint` do `PrivacyInfo.xcprivacy` sem erros.
+- Validações concluídas (S3, 25/11/2026):
+  - `swift test` e `xcodebuild test` (iPhone 17, iOS 27.2) com 100 testes em 18 suítes, todos com relógio fixo onde há comparação de datas;
+  - testes do escritor de crash (gravação síncrona, limite de 10, consentimento revogado, marcador com hora e expiração) e do handler (grava e chama o handler anterior);
+  - testes do motor com MetricKit: consentimento revogado, consentimento ainda não decidido, deduplicação em um payload posterior;
+  - testes do parser do MetricKit com payloads de exemplo montados a partir da estrutura documentada pela Apple (falha de segmentação, trap do Swift, exceção Objective-C e abort duplicado).
 - Validações pendentes:
+  - um `NSException` real derrubando um app e chegando ao Sentinel na abertura seguinte (S4, app de exemplo);
+  - um relatório real do MetricKit: só em iPhone físico (ou *Simulate MetricKit Payloads* no Xcode com aparelho conectado). Os payloads de teste seguem a estrutura documentada, mas não vieram de um aparelho. Conferir na S4: a ordem dos frames (raiz = frame que caiu) e o `image_addr` (endereço − `offsetIntoBinaryTextSegment`) contra o endereço de carga no `.ips` do mesmo crash; e se a janela `timeStampBegin`…`timeStampEnd` de um diagnóstico entregue logo na abertura seguinte contém a hora do crash (senão a deduplicação falha e a exceção aparece duas vezes — nunca some);
   - envio real pela fachada (`Sentinel.start` com `URLSession` e disco reais) contra o Sentinel: fica para o teste ponta a ponta da S4;
   - retomada por `NWPathMonitor` e pelas notificações de ciclo de vida: só comprovável rodando um app (S4);
   - envio ao ir para o segundo plano: hoje roda sem `beginBackgroundTask`, então o sistema pode suspender a requisição; verificar na S4 e, se preciso, pedir esse tempo extra;
@@ -112,6 +119,8 @@ Regras definidas pelo dono em 25/11/2026:
 - `Sources/SentinelKit/Envelope/`: `DSN`, `Envelope`, `EnvelopeEncoder`.
 - `Sources/SentinelKit/Model/`: tipos do evento e contextos.
 - `Sources/SentinelKit/Transport/`: `HTTPClient`, `URLSessionHTTPClient`, `Transport`, `TransportResult`, `RetryAfter`.
+- `Sources/SentinelKit/Crash/`: `ExceptionCrashHandler`, `CrashWriter`, `CrashSnapshot`, `CrashSnapshotStore` (a única ponte com lock, documentada), `MetricKitCrashParser`, `MetricKitPayload`, `MetricKitDelivery`, `MetricKitParseResult` e `MachException`.
+- `Sources/SentinelKit/Platform/MetricKitCrashSource.swift` (assinante do `MXMetricManager`, só no iOS).
 - `Sources/SentinelKit/Resources/PrivacyInfo.xcprivacy`.
 
 ## Pendências e decisões
@@ -123,4 +132,8 @@ Regras definidas pelo dono em 25/11/2026:
 - Resolvido na S2: um único `SentinelClient` (e portanto um único `Transport` e uma única `URLSession`) por app, criado no `start`.
 - Decisão (S2): nenhum comando espera a rede. A captura só grava em disco; `flush`, consentimento e retomada só disparam o envio.
 - Decisão (S2, revisão): o consentimento é lido de forma síncrona no `start` e conferido antes de cada envelope; revogar cancela o envio em andamento. Decisões tomadas antes do `start` são salvas, e revogar limpa a fila mesmo sem o SDK iniciado.
-- Próximo passo: S3.
+- Decisão (S3, revisada): o handler grava um marcador com a hora do crash. O primeiro diagnóstico do MetricKit que pareça uma exceção (com `objectiveCexceptionReason` ou `EXC_CRASH`/`SIGABRT`) dentro da janela do payload é tratado como cópia e ignorado, e o marcador é removido. Sem marcador, o MetricKit reporta a exceção com `exceptionName` e `composedMessage`. O marcador expira em 7 dias e é apagado ao revogar o consentimento.
+- Decisão (S3): crashes do MetricKit usam sempre `bundle@versão+build` da build que caiu, mesmo quando o app define `options.release`, porque o valor personalizado descreve a build atual. Sistema e modelo do aparelho também vêm do diagnóstico.
+- Decisão (S3): `mechanism.type` é `mach` quando o diagnóstico traz tipo de exceção Mach e `signal` quando só traz o sinal (como no plano).
+- Decisão (S3): o `CrashSnapshotStore` usa `NSLock` com `@unchecked Sendable` porque o handler é uma função C síncrona que não pode esperar um actor; é a única exceção e a invariante está documentada no tipo.
+- Próximo passo: S4.

@@ -25,6 +25,10 @@ actor SentinelClient {
 
     private let now: @Sendable () -> Date
 
+    private let appBinaryName: String?
+
+    private let crashSnapshots: CrashSnapshotStore?
+
     private var scope = Scope()
 
     private var consent: ConsentState
@@ -62,15 +66,29 @@ actor SentinelClient {
         consentStore: any ConsentStore,
         contexts: Contexts,
         stackTraceBuilder: StackTraceBuilder,
+        appBinaryName: String? = nil,
+        crashSnapshots: CrashSnapshotStore? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.options = options
         self.store = store
         self.consentStore = consentStore
         self.now = now
+        self.appBinaryName = appBinaryName
+        self.crashSnapshots = crashSnapshots
         consent = consentStore.load()
         transport = Transport(dsn: dsn, client: httpClient, now: now)
         builder = EventBuilder(options: options, contexts: contexts, stackTraceBuilder: stackTraceBuilder)
+        crashSnapshots?.update(
+            CrashSnapshot(
+                location: store.location,
+                options: options,
+                contexts: contexts,
+                scope: Scope(),
+                consentAllowsCapture: consent != .revoked,
+                stackTraceBuilder: stackTraceBuilder
+            )
+        )
     }
 
     // MARK: - Capture
@@ -93,10 +111,38 @@ actor SentinelClient {
 
     func addBreadcrumb(_ breadcrumb: Breadcrumb) {
         scope.add(breadcrumb)
+        publishCrashSnapshot()
     }
 
     func setCustom(_ key: String, _ value: String?) {
         scope.setCustom(key, value)
+        publishCrashSnapshot()
+    }
+
+    /// Crashes of earlier sessions reported by MetricKit.
+    func processMetricKitPayloads(_ deliveries: [MetricKitDelivery]) async {
+        guard consent != .revoked else {
+            return
+        }
+
+        let parser = MetricKitCrashParser(appBinaryName: appBinaryName, options: options, contexts: builder.contexts)
+
+        for delivery in deliveries {
+            let handlerCrash = CrashWriter.handlerCrashDate(in: store.directory, now: now())
+
+            guard let result = try? parser.parse(delivery, handlerCrash: handlerCrash) else {
+                Log.sdk.error("A MetricKit payload could not be read; it was skipped.")
+                continue
+            }
+
+            if result.matchedHandlerCrash {
+                CrashWriter.removeMarker(in: store.directory)
+            }
+
+            for event in result.events {
+                await enqueue(event)
+            }
+        }
     }
 
     // MARK: - Consent
@@ -105,6 +151,7 @@ actor SentinelClient {
     func grantConsent() {
         consent = .granted
         consentStore.save(.granted)
+        publishCrashSnapshot()
         startFlush()
     }
 
@@ -112,7 +159,9 @@ actor SentinelClient {
     func revokeConsent() async {
         consent = .revoked
         consentStore.save(.revoked)
+        publishCrashSnapshot()
         cancelDelivery()
+        CrashWriter.removeMarker(in: store.directory)
         try? await store.removeAll()
     }
 
@@ -135,6 +184,22 @@ actor SentinelClient {
     }
 
     // MARK: - Private Methods
+
+    /// What the uncaught-exception handler needs if the app crashes now.
+    private func makeCrashSnapshot() -> CrashSnapshot {
+        CrashSnapshot(
+            location: store.location,
+            options: options,
+            contexts: builder.contexts,
+            scope: scope,
+            consentAllowsCapture: consent != .revoked,
+            stackTraceBuilder: builder.stackTraceBuilder
+        )
+    }
+
+    private func publishCrashSnapshot() {
+        crashSnapshots?.update(makeCrashSnapshot())
+    }
 
     private func enqueue(_ event: Event) async {
         do {

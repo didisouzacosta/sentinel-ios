@@ -5,13 +5,19 @@ import Testing
 @Suite("Sentinel client")
 struct SentinelClientTests {
 
+    // MARK: - Fixtures
+
+    /// 2026-11-24 00:00 UTC, the start of the fixtures' window.
+    private static let fixtureWindowStart = Date(timeIntervalSince1970: 1_795_478_400)
+
     // MARK: - Helpers
 
     private func makeClient(
         in directory: URL,
         http: any HTTPClient,
         consent: ConsentPolicy = .required,
-        stored: ConsentState = .unknown
+        stored: ConsentState = .unknown,
+        now: @escaping @Sendable () -> Date = Date.init
     ) throws -> Harness {
         var options = Options()
         options.consent = consent
@@ -25,10 +31,21 @@ struct SentinelClientTests {
             store: store,
             consentStore: consentStore,
             contexts: Contexts(),
-            stackTraceBuilder: StackTraceBuilder(isInApp: { _ in false })
+            stackTraceBuilder: StackTraceBuilder(isInApp: { _ in false }),
+            now: now
         )
 
         return Harness(client: client, store: store, consentStore: consentStore)
+    }
+
+    private func metricKitDelivery(_ name: String) throws -> MetricKitDelivery {
+        let url = try #require(Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures"))
+
+        return try MetricKitDelivery(
+            json: Data(contentsOf: url),
+            begin: Self.fixtureWindowStart,
+            end: Self.fixtureWindowStart.addingTimeInterval(86340)
+        )
     }
 
     private func sentEvent(_ request: URLRequest?) throws -> [String: Any] {
@@ -198,6 +215,125 @@ struct SentinelClientTests {
 
             #expect(try await harness.store.pending().isEmpty)
             #expect(await http.requests.count == 1)
+        }
+    }
+
+    // MARK: - Crashes
+
+    @Test("sends native crashes reported by MetricKit on the next launch")
+    func metricKitCrash() async throws {
+        try await withTemporaryDirectory { directory in
+            let http = FakeHTTPClient(.status(200))
+            let harness = try makeClient(in: directory, http: http, consent: .notRequired)
+
+            try await harness.client.processMetricKitPayloads([metricKitDelivery("metrickit-bad-access")])
+            await harness.client.flush()
+
+            let event = try await sentEvent(http.requests.first)
+            let exception = try #require((event["exception"] as? [String: Any])?["values"] as? [[String: Any]])
+
+            #expect(event["level"] as? String == "fatal")
+            #expect(exception.first?["type"] as? String == "EXC_BAD_ACCESS")
+            #expect((event["debug_meta"] as? [String: Any])?["images"] != nil)
+        }
+    }
+
+    @Test("with consent revoked, MetricKit crashes are neither stored nor sent")
+    func metricKitCrashRevoked() async throws {
+        try await withTemporaryDirectory { directory in
+            let http = FakeHTTPClient(.status(200))
+            let harness = try makeClient(in: directory, http: http, stored: .revoked)
+
+            try await harness.client.processMetricKitPayloads([metricKitDelivery("metrickit-bad-access")])
+            await harness.client.flush()
+
+            #expect(try await harness.store.pending().isEmpty)
+            #expect(await http.requests.isEmpty)
+        }
+    }
+
+    @Test("with consent not decided yet, a MetricKit crash waits on the device until consent is granted")
+    func metricKitCrashWaitsForConsent() async throws {
+        try await withTemporaryDirectory { directory in
+            let http = FakeHTTPClient(.status(200))
+            let harness = try makeClient(in: directory, http: http)
+
+            try await harness.client.processMetricKitPayloads([metricKitDelivery("metrickit-bad-access")])
+            await harness.client.flush()
+
+            #expect(try await harness.store.pending().count == 1)
+            #expect(await http.requests.isEmpty)
+
+            await harness.client.grantConsent()
+            await harness.client.flush()
+
+            #expect(await http.requests.count == 1)
+        }
+    }
+
+    @Test("skips MetricKit's copy of a crash the handler wrote, even in a later payload, then drops the marker")
+    func metricKitDeduplication() async throws {
+        let crashTime = Self.fixtureWindowStart.addingTimeInterval(3600)
+        let (types, markerLeft) = try await crashTypesAfterHandlerCrash(
+            at: crashTime,
+            launchedAt: Self.fixtureWindowStart.addingTimeInterval(86400)
+        )
+
+        #expect(types == ["EXC_BAD_ACCESS", "EXC_BREAKPOINT", "NSRangeException"])
+        #expect(!markerLeft)
+    }
+
+    @Test("an expired marker (over a week old) deduplicates nothing, so no real crash can be hidden")
+    func metricKitExpiredMarker() async throws {
+        let crashTime = Self.fixtureWindowStart.addingTimeInterval(3600)
+        let (types, markerLeft) = try await crashTypesAfterHandlerCrash(
+            at: crashTime,
+            launchedAt: crashTime.addingTimeInterval(8 * 86400)
+        )
+
+        #expect(types == ["EXC_BAD_ACCESS", "EXC_BREAKPOINT", "NSRangeException", "NSRangeException"])
+        #expect(!markerLeft)
+    }
+
+    /// The handler writes a crash at `crashTime`; on a launch at `launchedAt` MetricKit delivers the two fixtures.
+    /// Returns the exception types sent (sorted) and whether the marker is still on disk.
+    private func crashTypesAfterHandlerCrash(at crashTime: Date, launchedAt: Date) async throws -> ([String], Bool) {
+        try await withTemporaryDirectory { directory in
+            let http = FakeHTTPClient(.status(200))
+            let harness = try makeClient(in: directory, http: http, consent: .notRequired, now: { launchedAt })
+
+            CrashWriter.write(
+                exceptionName: "NSRangeException",
+                reason: "index 5 beyond bounds [0 .. 2]",
+                addresses: [],
+                snapshot: CrashSnapshot(
+                    location: harness.store.location,
+                    options: Options(),
+                    contexts: Contexts(),
+                    scope: Scope(),
+                    consentAllowsCapture: true,
+                    stackTraceBuilder: StackTraceBuilder(isInApp: { _ in false })
+                ),
+                now: crashTime
+            )
+
+            try await harness.client.processMetricKitPayloads([
+                metricKitDelivery("metrickit-bad-access"),
+                metricKitDelivery("metrickit-fatal-error"),
+            ])
+            await harness.client.flush()
+
+            let types = try await http.requests.compactMap { request in
+                let exception = try sentEvent(request)["exception"] as? [String: Any]
+
+                return (exception?["values"] as? [[String: Any]])?.first?["type"] as? String
+            }
+
+            let markerLeft = FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(CrashWriter.markerName).path
+            )
+
+            return (types.sorted(), markerLeft)
         }
     }
 

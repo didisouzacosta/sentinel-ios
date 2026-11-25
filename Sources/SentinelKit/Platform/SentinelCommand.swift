@@ -13,6 +13,8 @@ enum SentinelCommand: Sendable {
     case grantConsent
     case revokeConsent
     case connectivityRestored
+    /// MetricKit diagnostics (JSON) with crashes of earlier sessions.
+    case metricKitPayloads([MetricKitDelivery])
     /// Starts sending without waiting (launch, app lifecycle).
     case triggerFlush
     /// Resumes once the queue was sent (or delivery had to stop); does not hold the queue meanwhile.

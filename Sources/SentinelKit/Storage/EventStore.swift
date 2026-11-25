@@ -15,9 +15,12 @@ actor EventStore {
 
     // MARK: - Properties
 
-    private let directory: URL
+    /// Also read by the crash writer, which must write synchronously while the app is crashing.
+    nonisolated let location: QueueLocation
 
-    private let capacity: Int
+    nonisolated var directory: URL {
+        location.directory
+    }
 
     private let now: @Sendable () -> Date
 
@@ -26,10 +29,11 @@ actor EventStore {
     // MARK: - Initializer
 
     init(directory: URL, capacity: Int = defaultCapacity, now: @escaping @Sendable () -> Date = Date.init) {
-        self.directory = directory
-        self.capacity = capacity
+        location = QueueLocation(directory: directory, capacity: capacity)
         self.now = now
     }
+
+    // MARK: - Type Methods
 
     /// `Caches/SentinelKit/`, which the system may clear under disk pressure but never backs up.
     static func defaultDirectory() -> URL {
@@ -39,28 +43,31 @@ actor EventStore {
         return caches.appendingPathComponent("SentinelKit", isDirectory: true)
     }
 
-    // MARK: - Methods
+    /// Writes one envelope and trims the queue. Synchronous so the crash handler can use it while the app dies.
+    static func write(_ data: Data, id: EventID, sequence: Int, to location: QueueLocation, date: Date) throws {
+        try FileManager.default.createDirectory(at: location.directory, withIntermediateDirectories: true)
 
-    func save(_ data: Data, id: EventID) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let millis = UInt64(date.timeIntervalSince1970 * 1000)
+        let name = String(format: "%013llu-%06ld-%@.%@", millis, sequence % 1_000_000, id.rawValue, fileExtension)
 
-        sequence += 1
+        try data.write(to: location.directory.appendingPathComponent(name), options: .atomic)
 
-        let millis = UInt64(now().timeIntervalSince1970 * 1000)
-        let name = String(format: "%013llu-%06ld-%@.%@", millis, sequence % 1_000_000, id.rawValue, Self.fileExtension)
+        let envelopes = try pending(in: location.directory)
 
-        try data.write(to: directory.appendingPathComponent(name), options: .atomic)
-        try trimToCapacity()
+        // A flush may remove a file at the same time (even while the app crashes): missing files are fine.
+        for envelope in envelopes.prefix(max(0, envelopes.count - location.capacity)) {
+            try? FileManager.default.removeItem(at: envelope.url)
+        }
     }
 
-    /// Envelopes on disk, oldest first.
-    func pending() throws -> [StoredEnvelope] {
+    /// Envelopes in `directory`, oldest first.
+    static func pending(in directory: URL) throws -> [StoredEnvelope] {
         guard FileManager.default.fileExists(atPath: directory.path) else {
             return []
         }
 
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == Self.fileExtension }
+            .filter { $0.pathExtension == fileExtension }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .map { url in
                 let name = url.deletingPathExtension().lastPathComponent
@@ -70,22 +77,25 @@ actor EventStore {
             }
     }
 
+    // MARK: - Methods
+
+    func save(_ data: Data, id: EventID) throws {
+        sequence += 1
+
+        try Self.write(data, id: id, sequence: sequence, to: location, date: now())
+    }
+
+    /// Envelopes on disk, oldest first.
+    func pending() throws -> [StoredEnvelope] {
+        try Self.pending(in: directory)
+    }
+
     func remove(_ envelope: StoredEnvelope) throws {
         try FileManager.default.removeItem(at: envelope.url)
     }
 
     func removeAll() throws {
         for envelope in try pending() {
-            try remove(envelope)
-        }
-    }
-
-    // MARK: - Private Methods
-
-    private func trimToCapacity() throws {
-        let envelopes = try pending()
-
-        for envelope in envelopes.prefix(max(0, envelopes.count - capacity)) {
             try remove(envelope)
         }
     }

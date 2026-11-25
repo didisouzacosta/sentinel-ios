@@ -1,0 +1,53 @@
+{
+  "timeStampBegin": "2026-11-24 00:00:00",
+  "timeStampEnd": "2026-11-24 23:59:00",
+  "crashDiagnostics": [
+    {
+      "version": "1.0.0",
+      "diagnosticMetaData": {
+        "appBuildVersion": "412",
+        "appVersion": "3.2.0",
+        "bundleIdentifier": "com.example.shop",
+        "deviceType": "iPhone17,1",
+        "osVersion": "iPhone OS 26.1 (23B85)",
+        "exceptionType": 6,
+        "exceptionCode": 1,
+        "signal": 5
+      },
+      "callStackTree": {
+        "callStackPerThread": true,
+        "callStacks": [
+          {
+            "threadAttributed": true,
+            "callStackRootFrames": [
+              {
+                "binaryUUID": "A1B2C3D4-0000-1111-2222-333344445555",
+                "offsetIntoBinaryTextSegment": 200000,
+                "sampleCount": 1,
+                "binaryName": "Shop",
+                "address": 4295167296
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "version": "1.0.0",
+      "diagnosticMetaData": {
+        "appBuildVersion": "412",
+        "appVersion": "3.2.0",
+        "bundleIdentifier": "com.example.shop",
+        "exceptionType": 10,
+        "exceptionCode": 0,
+        "signal": 6,
+        "objectiveCexceptionReason": {
+          "composedMessage": "*** -[__NSArrayM objectAtIndex:]: index 5 beyond bounds [0 .. 2]",
+          "exceptionName": "NSRangeException",
+          "exceptionType": "NSException"
+        }
+      },
+      "callStackTree": { "callStackPerThread": true, "callStacks": [] }
+    }
+  ]
+}

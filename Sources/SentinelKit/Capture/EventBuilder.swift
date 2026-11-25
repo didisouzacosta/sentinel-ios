@@ -31,6 +31,24 @@ struct EventBuilder: Sendable {
         return event
     }
 
+    /// An uncaught Objective-C exception: fatal and unhandled.
+    func event(exceptionName: String, reason: String, addresses: [UInt], scope: Scope, at date: Date) -> Event {
+        let frames = stackTraceBuilder.frames(from: addresses)
+
+        var event = base(level: .fatal, scope: scope, at: date)
+        event.exception = ExceptionList(
+            values: [
+                ExceptionValue(
+                    type: exceptionName,
+                    value: reason,
+                    mechanism: Mechanism(type: "NSException", handled: false),
+                    stacktrace: frames.isEmpty ? nil : Stacktrace(frames: frames)
+                ),
+            ]
+        )
+        return event
+    }
+
     func event(message: String, level: Level, scope: Scope, at date: Date) -> Event {
         var event = base(level: level, scope: scope, at: date)
         event.message = message

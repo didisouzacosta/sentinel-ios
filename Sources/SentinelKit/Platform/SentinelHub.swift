@@ -54,13 +54,17 @@ final class SentinelHub: Sendable {
         hub: SentinelHub
     ) async {
         var client: SentinelClient?
+        var systemObservers: [any Sendable] = []
 
         for await command in commands {
             if case let .start(dsn, options) = command {
+                let wasStarted = client != nil
+
                 client = await start(current: client, dsn: dsn, options: options, context: context)
 
-                if client != nil, observesSystem {
-                    observeSystem(hub: hub)
+                if !wasStarted, client != nil, observesSystem {
+                    // Kept for the whole life of the loop (the SDK's lifetime).
+                    systemObservers = observeSystem(hub: hub)
                 }
 
                 continue
@@ -72,6 +76,8 @@ final class SentinelHub: Sendable {
                 await handleWithoutClient(command, context: context)
             }
         }
+
+        withExtendedLifetime(systemObservers) {}
     }
 
     private static func start(
@@ -125,6 +131,9 @@ final class SentinelHub: Sendable {
         case .connectivityRestored:
             await client.connectivityRestored()
 
+        case let .metricKitPayloads(payloads):
+            await client.processMetricKitPayloads(payloads)
+
         case .triggerFlush:
             await client.triggerFlush()
 
@@ -150,6 +159,7 @@ final class SentinelHub: Sendable {
 
         case .revokeConsent:
             context.consentStore.save(.revoked)
+            CrashWriter.removeMarker(in: context.store.directory)
             try? await context.store.removeAll()
 
         case let .flush(done), let .barrier(done):
@@ -160,8 +170,17 @@ final class SentinelHub: Sendable {
         }
     }
 
-    /// Sends the queue when the network comes back and when the app goes to or returns from the background.
-    private static func observeSystem(hub: SentinelHub) {
+    /// Installs the crash handlers and sends the queue when the network comes back and when the app goes to or returns
+    /// from the background. Returns objects that must stay alive (the MetricKit subscriber).
+    private static func observeSystem(hub: SentinelHub) -> [any Sendable] {
+        var observers: [any Sendable] = []
+
+        ExceptionCrashHandler.install()
+
+        #if canImport(MetricKit) && os(iOS)
+            observers.append(MetricKitCrashSource.register(hub: hub))
+        #endif
+
         Task {
             var wasOnline = true
 
@@ -183,6 +202,8 @@ final class SentinelHub: Sendable {
                 }
             }
         #endif
+
+        return observers
     }
 
     // MARK: - Methods

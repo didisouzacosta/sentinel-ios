@@ -35,6 +35,8 @@ struct Event: Sendable, Encodable {
 
     var contexts: Contexts?
 
+    var debugMeta: DebugMeta?
+
     var fingerprint: [String]?
 
     var sdk: SDKInfo
@@ -73,6 +75,7 @@ struct Event: Sendable, Encodable {
         case tags
         case breadcrumbs
         case contexts
+        case debugMeta = "debug_meta"
         case fingerprint
         case sdk
     }

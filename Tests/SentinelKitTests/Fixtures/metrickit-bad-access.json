@@ -1,0 +1,69 @@
+{
+  "timeStampBegin": "2026-11-24 00:00:00",
+  "timeStampEnd": "2026-11-24 23:59:00",
+  "crashDiagnostics": [
+    {
+      "version": "1.0.0",
+      "diagnosticMetaData": {
+        "appBuildVersion": "412",
+        "appVersion": "3.2.0",
+        "bundleIdentifier": "com.example.shop",
+        "deviceType": "iPhone17,1",
+        "osVersion": "iPhone OS 26.1 (23B85)",
+        "platformArchitecture": "arm64e",
+        "exceptionType": 1,
+        "exceptionCode": 0,
+        "signal": 11,
+        "terminationReason": "Namespace SIGNAL, Code 11 Segmentation fault: 11",
+        "virtualMemoryRegionInfo": "0 is not in any region."
+      },
+      "callStackTree": {
+        "callStackPerThread": true,
+        "callStacks": [
+          {
+            "threadAttributed": false,
+            "callStackRootFrames": [
+              {
+                "binaryUUID": "11111111-2222-3333-4444-555555555555",
+                "offsetIntoBinaryTextSegment": 4096,
+                "sampleCount": 1,
+                "binaryName": "libsystem_kernel.dylib",
+                "address": 7200000000
+              }
+            ]
+          },
+          {
+            "threadAttributed": true,
+            "callStackRootFrames": [
+              {
+                "binaryUUID": "A1B2C3D4-0000-1111-2222-333344445555",
+                "offsetIntoBinaryTextSegment": 123456,
+                "sampleCount": 1,
+                "binaryName": "Shop",
+                "address": 4295090752,
+                "subFrames": [
+                  {
+                    "binaryUUID": "A1B2C3D4-0000-1111-2222-333344445555",
+                    "offsetIntoBinaryTextSegment": 120000,
+                    "sampleCount": 1,
+                    "binaryName": "Shop",
+                    "address": 4295087296,
+                    "subFrames": [
+                      {
+                        "binaryUUID": "99999999-8888-7777-6666-555555555555",
+                        "offsetIntoBinaryTextSegment": 2048,
+                        "sampleCount": 1,
+                        "binaryName": "UIKitCore",
+                        "address": 6800002048
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
