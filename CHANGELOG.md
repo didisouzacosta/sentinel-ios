@@ -3,6 +3,15 @@
 Todas as mudanças relevantes do SentinelKit. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [SemVer](https://semver.org/lang/pt-BR/). Até a 1.0, uma versão menor (0.x) pode quebrar a API.
 
+## [Unreleased]
+
+### Adicionado
+
+- `debug_meta.images` também nos erros capturados e nas exceções `NSException` (antes só nos crashes do MetricKit):
+  cada binário citado pelos frames vai com UUID (`debug_id`), endereço de carga (`image_addr`), tamanho
+  (`image_size`), arquitetura (`arch`) e caminho (`code_file`, relativo à pasta do app, como `MeuApp.app/MeuApp`, para
+  não enviar o caminho de instalação), para que um servidor Sentinel com o dSYM daquela build possa casar os binários.
+
 ## [0.1.0] - 2026-11-25
 
 Primeira versão.
@@ -24,4 +33,5 @@ Primeira versão.
 - `PrivacyInfo.xcprivacy` com dados de diagnóstico não ligados à identidade, sem rastreamento.
 - App de exemplo em `Example/` e teste opcional contra um servidor real (`swift test --filter LiveServer`).
 
+[Unreleased]: https://github.com/didisouzacosta/sentinel-ios/compare/0.1.0...HEAD
 [0.1.0]: https://github.com/didisouzacosta/sentinel-ios/releases/tag/0.1.0

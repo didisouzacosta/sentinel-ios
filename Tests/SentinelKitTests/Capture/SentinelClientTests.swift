@@ -359,6 +359,7 @@ struct SentinelClientTests {
             #expect((event["breadcrumbs"] as? [[String: Any]])?.first?["message"] as? String == "Tapped Pay")
             #expect(event["tags"] as? [String: String] == ["plan": "pro"])
             #expect(exception.first?["type"] as? String == "PaymentError")
+            #expect(((event["debug_meta"] as? [String: Any])?["images"] as? [[String: Any]])?.isEmpty == false)
             #expect(event["user"] == nil)
         }
     }
