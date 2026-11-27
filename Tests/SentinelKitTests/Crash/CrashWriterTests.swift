@@ -65,6 +65,34 @@ struct CrashWriterTests {
         }
     }
 
+    @Test("writes debug_meta with one image per binary the crash's frames point into")
+    func writesDebugMeta() async throws {
+        try await withTemporaryDirectory { directory in
+            #expect(writeCrash(snapshot(in: directory)))
+
+            let pending = try await EventStore(directory: directory).pending()
+            let event = try event(at: #require(pending.first).url)
+            let images = try #require((event["debug_meta"] as? [String: Any])?["images"] as? [[String: Any]])
+            let exception = try #require((event["exception"] as? [String: Any])?["values"] as? [[String: Any]])
+            let stacktrace = try #require(exception.first?["stacktrace"] as? [String: Any])
+            let frames = try #require(stacktrace["frames"] as? [[String: Any]])
+
+            #expect(!images.isEmpty)
+
+            for image in images {
+                #expect(image["type"] as? String == "macho")
+                #expect(MachOFixtures.isDebugID(image["debug_id"] as? String))
+                #expect(((image["image_size"] as? NSNumber)?.uint64Value ?? 0) > 0)
+                #expect(image["arch"] is String)
+            }
+
+            #expect(
+                Set(frames.compactMap { $0["image_addr"] as? String })
+                    == Set(images.compactMap { $0["image_addr"] as? String })
+            )
+        }
+    }
+
     @Test("keeps the queue at 10, with the crash as the newest envelope")
     func respectsCapacity() async throws {
         try await withTemporaryDirectory { directory in

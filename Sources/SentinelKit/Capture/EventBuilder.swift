@@ -15,7 +15,7 @@ struct EventBuilder: Sendable {
 
     func event(for error: any Error, addresses: [UInt], scope: Scope, at date: Date) -> Event {
         let descriptor = ErrorDescriptor(error)
-        let frames = stackTraceBuilder.frames(from: addresses)
+        let trace = stackTraceBuilder.resolve(addresses)
 
         var event = base(level: .error, scope: scope, at: date)
         event.exception = ExceptionList(
@@ -24,16 +24,17 @@ struct EventBuilder: Sendable {
                     type: descriptor.type,
                     value: descriptor.value,
                     mechanism: Mechanism(type: "generic", handled: true),
-                    stacktrace: frames.isEmpty ? nil : Stacktrace(frames: frames)
+                    stacktrace: trace.stacktrace
                 ),
             ]
         )
+        event.debugMeta = trace.debugMeta
         return event
     }
 
     /// An uncaught Objective-C exception: fatal and unhandled.
     func event(exceptionName: String, reason: String, addresses: [UInt], scope: Scope, at date: Date) -> Event {
-        let frames = stackTraceBuilder.frames(from: addresses)
+        let trace = stackTraceBuilder.resolve(addresses)
 
         var event = base(level: .fatal, scope: scope, at: date)
         event.exception = ExceptionList(
@@ -42,10 +43,11 @@ struct EventBuilder: Sendable {
                     type: exceptionName,
                     value: reason,
                     mechanism: Mechanism(type: "NSException", handled: false),
-                    stacktrace: frames.isEmpty ? nil : Stacktrace(frames: frames)
+                    stacktrace: trace.stacktrace
                 ),
             ]
         )
+        event.debugMeta = trace.debugMeta
         return event
     }
 

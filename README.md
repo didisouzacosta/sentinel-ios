@@ -104,7 +104,8 @@ protocolo (`SentinelService`), então as previews e os testes do view model nunc
   - se o seu app usa outra base legal, inicie com `options.consent = .notRequired`.
 - **Sem dados pessoais automáticos:**
   - não há campo de usuário;
-  - o SDK não coleta nome do aparelho, IP, IDFA nem IDFV.
+  - o SDK não coleta nome do aparelho, IP, IDFA nem IDFV;
+  - nos binários do `debug_meta` de erros e exceções, o caminho (`code_file`) dos que ficam dentro do app vai relativo à pasta que contém o `.app` (`MeuApp.app/MeuApp`), sem o caminho de instalação; bibliotecas do sistema vão com o caminho do sistema. Numa extensão de app, o pacote principal é o `.appex`: só os binários dentro do próprio `.appex` vão com caminho relativo, e os do app que a contém vão com o caminho completo.
 - **Identificar alguém é opção sua:** use `Sentinel.setCustom("chave", "valor")`, de preferência com um identificador interno e não com e-mail ou nome. Também não coloque dados pessoais em mensagens e breadcrumbs.
   Se você enviar um identificador do usuário, os dados passam a ser "ligados à identidade": declare isso no manifesto de privacidade e na ficha de privacidade do **seu** app.
 - **Manifesto da Apple:** o pacote traz `PrivacyInfo.xcprivacy` declarando dados de diagnóstico, não ligados à identidade e sem rastreamento.
@@ -115,11 +116,12 @@ Não há nada a configurar: `Sentinel.start` liga a captura.
 
 | Tipo | Como chega | O que traz |
 |---|---|---|
-| Exceção Objective-C não tratada (`NSException`, por exemplo índice fora do array em código Foundation) | Gravada no aparelho no momento do crash e enviada na abertura seguinte. O handler que o app já tinha continua sendo chamado. | Tipo e motivo da exceção, stack com nomes de função, breadcrumbs e parâmetros personalizados. |
+| Exceção Objective-C não tratada (`NSException`, por exemplo índice fora do array em código Foundation) | Gravada no aparelho no momento do crash e enviada na abertura seguinte. O handler que o app já tinha continua sendo chamado. | Tipo e motivo da exceção, stack com nomes de função, endereços e o UUID de cada binário (`debug_meta`), breadcrumbs e parâmetros personalizados. |
 | Crash nativo: `fatalError`, force unwrap de `nil`, índice fora do array em Swift, acesso inválido à memória | O iOS entrega o relatório pelo MetricKit numa abertura seguinte. | Exceção e sinal (`EXC_BAD_ACCESS`/`SIGSEGV`, `EXC_BREAKPOINT`/`SIGTRAP`…), endereços e o UUID de cada binário (`debug_meta`), prontos para simbolização. Breadcrumbs da sessão que caiu não estão disponíveis. |
 
 - **Duplicatas:** quando o SDK grava uma exceção, ele anota a hora. O relatório do MetricKit da mesma janela é reconhecido e ignorado uma vez, e a anotação expira em 7 dias. Se o handler não chegou a gravar (crash antes do `Sentinel.start`, por exemplo), o MetricKit reporta a exceção com nome e mensagem.
-- **Nomes de função:** nas exceções, vêm do próprio aparelho e podem ser aproximados em builds de release sem símbolos. Nos crashes nativos ainda não há nomes: o Sentinel ainda não simboliza, então esses frames mostram binário e endereço.
+- **Binários (`debug_meta`):** os erros capturados com `Sentinel.capture(_:)` e as exceções levam, para cada binário citado pelos frames, o UUID, o endereço de carga, o tamanho e a arquitetura; os crashes nativos (MetricKit) levam o UUID e o endereço de carga. Isso serve para que um servidor Sentinel com o dSYM daquela build possa casar os binários.
+- **Nomes de função:** nos erros e nas exceções, vêm do próprio aparelho e podem ser aproximados em builds de release sem símbolos. Nos crashes nativos ainda não há nomes: o Sentinel ainda não simboliza, então esses frames mostram binário e endereço.
 - **Handler anterior:** o SDK chama o handler de exceções que já estava instalado antes do `Sentinel.start`. Um handler instalado depois substitui o do SDK.
 - **Onde testar:** o MetricKit só entrega relatórios num iPhone de verdade, não no simulador. Com o aparelho conectado, *Debug → Simulate MetricKit Payloads* no Xcode gera um de teste.
 - **Dados do crash nativo:** a versão do app, do sistema e o modelo do aparelho são os do momento do crash, não os da abertura atual.

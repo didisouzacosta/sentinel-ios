@@ -80,6 +80,44 @@ struct EventEncodingTests {
         #expect(breadcrumbs.first?["category"] as? String == "ui")
     }
 
+    @Test("sends image_size as a number and arch when known, and omits both when unknown")
+    func debugImageKeys() throws {
+        var event = EventFixtures.message
+        event.debugMeta = DebugMeta(
+            images: [
+                DebugImage(
+                    debugID: "a1b2c3d4-0000-1111-2222-333344445555",
+                    imageAddress: "0x0000000100000000",
+                    codeFile: "Shop.app/Shop",
+                    imageSize: 16384,
+                    arch: "arm64"
+                ),
+                DebugImage(
+                    debugID: "a1b2c3d4-0000-1111-2222-333344445555",
+                    imageAddress: "0x0000000100000000",
+                    codeFile: "Shop"
+                ),
+            ]
+        )
+
+        let object = try json(event)
+        let images = try #require((object["debug_meta"] as? [String: Any])?["images"] as? [[String: Any]])
+        let known = try #require(images.first)
+        let unknown = try #require(images.last)
+
+        #expect(known["type"] as? String == "macho")
+        #expect(known["debug_id"] as? String == "a1b2c3d4-0000-1111-2222-333344445555")
+        #expect(known["image_addr"] as? String == "0x0000000100000000")
+        #expect(known["code_file"] as? String == "Shop.app/Shop")
+        #expect((known["image_size"] as? NSNumber)?.int64Value == 16384)
+        #expect(known["image_size"] is NSNumber)
+        #expect(!(known["image_size"] is String))
+        #expect(known["arch"] as? String == "arm64")
+        #expect(unknown["image_size"] == nil)
+        #expect(unknown["arch"] == nil)
+        #expect(unknown["code_file"] as? String == "Shop")
+    }
+
     // MARK: - Event id
 
     @Test("generates random ids as 32 lowercase hex characters")

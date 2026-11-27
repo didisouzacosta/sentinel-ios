@@ -34,6 +34,7 @@
   - S2: fachada `Sentinel` (`start`, `capture`, `addBreadcrumb`, `setCustom`, `grantConsent`, `revokeConsent` e `flush`), fila ordenada de comandos, contextos de app, sistema e aparelho, stack trace resolvido no aparelho, fila offline de 10, envio em segundo plano com backoff, retomada quando a rede volta e no ciclo de vida do app, e `PrivacyInfo.xcprivacy`.
   - S3: crashes por `NSException` (handler gravando em disco de forma síncrona, com breadcrumbs, encadeando o handler anterior) e pelo MetricKit (`MXCrashDiagnostic` com `debug_meta` e UUIDs), deduplicados dentro da janela do payload;
   - S4: tempo extra de segundo plano para o envio ao sair do app (`LifecycleObserver` + `BackgroundTime`, com `UIApplication` resolvido em tempo de execução para o SDK continuar utilizável em extensões), app de exemplo em `Example/` com testes do view model, teste opcional contra um servidor real (`LiveServer`) e versão 0.1.0.
+  - Fase 7: `debug_meta.images` também nos erros capturados e nas exceções `NSException`. Para cada binário citado pelos frames (só esses, um por endereço de carga), o SDK lê do cabeçalho Mach-O em memória o UUID (`debug_id`), o tamanho do `__TEXT` (`image_size`) e a arquitetura (`arch`), e envia o endereço de carga (`image_addr`) e o caminho (`code_file`). Os crashes do MetricKit não mudaram.
 - Limites conhecidos do servidor, que o SDK respeita:
   - `message` em texto simples;
   - `timestamp` em ISO-8601, porque fora de ±24h o servidor troca pela hora de chegada;
@@ -42,7 +43,7 @@
   - só `gzip` como compressão;
   - breadcrumbs em array, no máximo 50;
   - frames acima de 100 são cortados no meio.
-- O servidor não simboliza frames. O SDK envia `function`, `package` e `filename` resolvidos no aparelho, além de `instruction_addr`, `image_addr` e `debug_meta`, para uma simbolização futura.
+- O servidor ainda não simboliza frames. O SDK envia `function`, `package` e `filename` resolvidos no aparelho, além de `instruction_addr`, `image_addr` e `debug_meta`: nos erros e nas exceções, UUID, endereço de carga, tamanho e arquitetura de cada binário; nos crashes do MetricKit, UUID e endereço de carga. Isso serve para que um servidor Sentinel com o dSYM daquela build possa casar os binários.
 
 ## Privacidade (GDPR) e uso offline
 
@@ -109,7 +110,16 @@ Regras definidas pelo dono em 25/11/2026:
   - testes novos: `BackgroundTime` (fim único, expiração, sem tempo concedido) e `LifecycleObserver` (tempo pedido antes do envio e liberado só depois, pedidos sobrepostos, volta ao primeiro plano); 5 testes do view model do app de exemplo;
   - `swift test --filter LiveServer` com `URLSession` real: evento aceito e encontrado pela `/api/0`;
   - no sentinel-lab, `sentinelkit-contract.test.ts` ingere a fixture do contrato e confere título, nível, plataforma e culprit.
+- Validações concluídas (Fase 7, 27/11/2026):
+  - `swift test` com 129 testes em 22 suítes (a suíte `LiveServer` foi pulada, sem `SENTINEL_DSN`), e `xcodebuild test` do pacote no simulador iPhone 17 (iOS 27.2) com os mesmos 129 testes: TEST SUCCEEDED;
+  - testes novos: formato do UUID e tamanhos errados; cabeçalhos sintéticos (com e sem `__TEXT`, sem `LC_UUID`, `ncmds` exagerado, seis formas malformadas que devolvem nil sem travar); arquiteturas; cabeçalho real de uma imagem carregada conferido com `getsegmentdata` e a lista do dyld; imagens de uma stack real (uma por endereço, na ordem dos frames); `code_file` relativo ao container; `debug_meta` num erro capturado (modelo, JSON e corpo enviado) e no envelope gravado pelo `CrashWriter`; chaves `image_size`/`arch` omitidas quando desconhecidas; nenhum `debug_meta` em mensagens ou sem frames. Os testes do parser do MetricKit passaram sem mudança;
+  - app de exemplo: 5 testes do view model (`xcodebuild test`), TEST SUCCEEDED;
+  - `scripts/lint-swift.sh` sem violações, `swift build` sem avisos e `swiftc -typecheck -application-extension` sem erros;
+  - no simulador iPhone 17 (iOS 27.2), app de exemplo em Debug com dSYM, consentimento não decidido (nada enviado): o erro capturado ficou na fila com 9 imagens, entre elas `SentinelExample.app/SentinelExample` com `debug_id` `c96f925a-a426-3d92-828d-b8ae77a24190`, igual ao `dwarfdump --uuid` do dSYM e do binário (arm64), `image_size` 720896 e `arch` `arm64`; o frame `PlaygroundViewModel.captureError()` é `in_app`, tem o `image_addr` dessa imagem e o `instruction_addr` dentro de `[image_addr, image_addr + image_size)`; nenhum `code_file` com o container do app ou `/Users/`;
+  - `NSException` real no mesmo simulador: o envelope `NSRangeException` (`fatal`) gravado pelo handler trouxe 10 imagens, com a do app idêntica e o frame `PlaygroundViewModel.crashWithException()` dentro do intervalo;
+  - envio real à produção (projeto `symbolication-test`), feito pelo principal com a mesma build Debug com dSYM no simulador iPhone 17: app reinstalado e aberto com o DSN do projeto, "Capture error", depois "Grant consent", e a fila esvaziou. Evento `0b2f2a7197644ee7ade56a2479296836`. O `check_debug_files` do MCP do Sentinel listou 9 imagens: `c96f925a-a426-3d92-828d-b8ae77a24190` (`SentinelExample.app/SentinelExample`, arm64) com `needed: true` e as 8 do sistema com `needed: false`; as 9 aparecem como ausentes porque nenhum dSYM foi enviado.
 - Validações pendentes:
+  - Fase 7: simbolização no servidor com o dSYM enviado (o envio do evento e a detecção da imagem necessária já foram vistos em produção; o casamento com um dSYM enviado não); o `debug_meta` em aparelho físico (no simulador as bibliotecas do sistema vêm de dentro do runtime, com caminhos longos);
   - um relatório real do MetricKit: só em iPhone físico (ou *Simulate MetricKit Payloads* no Xcode com aparelho conectado). Os payloads de teste seguem a estrutura documentada, mas não vieram de um aparelho. Conferir na S4: a ordem dos frames (raiz = frame que caiu) e o `image_addr` (endereço − `offsetIntoBinaryTextSegment`) contra o endereço de carga no `.ips` do mesmo crash; e se a janela `timeStampBegin`…`timeStampEnd` de um diagnóstico entregue logo na abertura seguinte contém a hora do crash (senão a deduplicação falha e a exceção aparece duas vezes — nunca some);
   - retomada pelo `NWPathMonitor` com a rede caindo e voltando de verdade (coberta só por testes com rede falsa);
   - envio em segundo plano com o servidor demorando mais que o tempo concedido (a expiração encerra a tarefa; o envelope fica em disco para a próxima abertura);
@@ -121,7 +131,7 @@ Regras definidas pelo dono em 25/11/2026:
 
 - `Sources/SentinelKit/Public/`: `Sentinel` (fachada), `Options`, `ConsentPolicy`, `Level`. Só esses são públicos.
 - `Sources/SentinelKit/Platform/`: `SentinelHub` (fila ordenada de comandos e observação de rede e ciclo de vida), `ConnectivityMonitor` (`NWPathMonitor`), `LifecycleObserver` e `LifecycleEvents` (envio ao ir para o segundo plano e ao voltar), `BackgroundTime`, `BackgroundTaskRunning`, `BackgroundTaskID` e `UIKitBackgroundTasks` (tempo extra de segundo plano; o último só no iOS), `SentinelCommand` e `Log`.
-- `Sources/SentinelKit/Capture/`: `SentinelClient` (motor), `EventBuilder`, `Scope`, `ErrorDescriptor`, `StackTraceBuilder`, `SymbolDemangler`, `ContextProvider` e `AppInfo`.
+- `Sources/SentinelKit/Capture/`: `SentinelClient` (motor), `EventBuilder`, `Scope`, `ErrorDescriptor`, `StackTraceBuilder`, `ResolvedStackTrace` (frames e imagens de uma stack), `MachOImage` (UUID, tamanho do `__TEXT` e arquitetura lidos do cabeçalho em memória), `SymbolDemangler`, `ContextProvider` e `AppInfo`.
 - `Sources/SentinelKit/Storage/`: `EventStore` (fila de 10 em `Caches/SentinelKit/`), `ConsentStore` e `UserDefaultsConsentStore`.
 - `Sources/SentinelKit/Delivery/`: `DeliveryState` (rate limit e backoff de 30 s até 1 h).
 - `Sources/SentinelKit/Envelope/`: `DSN`, `Envelope`, `EnvelopeEncoder`.
@@ -146,6 +156,8 @@ Regras definidas pelo dono em 25/11/2026:
 - Decisão (S3): crashes do MetricKit usam sempre `bundle@versão+build` da build que caiu, mesmo quando o app define `options.release`, porque o valor personalizado descreve a build atual. Sistema e modelo do aparelho também vêm do diagnóstico.
 - Decisão (S3): `mechanism.type` é `mach` quando o diagnóstico traz tipo de exceção Mach e `signal` quando só traz o sinal (como no plano).
 - Decisão (S3): o `CrashSnapshotStore` usa `NSLock` com `@unchecked Sendable` porque o handler é uma função C síncrona que não pode esperar um actor; é a única exceção e a invariante está documentada no tipo.
+- Decisão (Fase 7, D1): o UUID, o tamanho do `__TEXT` e a arquitetura saem do cabeçalho Mach-O no endereço de carga que o `dladdr` devolve (`dli_fbase`), lido uma vez por stack e com toda leitura limitada por `sizeofcmds` e `cmdsize`; não há tabela do dyld, callback de carga de imagem nem cache global. Cabeçalho ilegível: o frame mantém o `image_addr` e a imagem fica de fora.
+- Decisão (Fase 7, D3, a confirmar pelo dono no PR): o `code_file` das imagens dentro do container do app (a pasta que contém o `.app`) vai relativo a ele (`SentinelExample.app/SentinelExample`), porque o caminho completo traz o UUID da instalação e, no simulador, o nome do usuário; as demais vão com o caminho completo. O servidor só exibe o `code_file` (o casamento usa o `debug_id`). Limites: numa extensão o `Bundle.main` é o `.appex`, então frameworks do app fora dele vão com o caminho completo. Reverter é passar `appContainerPath: nil` em `StackTraceBuilder.app`.
 - Decisão (S4): o app de exemplo exige iOS 17 (para `@Observable` e previews modernas); o SDK continua em iOS 15.
 - Decisão (S4, desvio do plano): o teste contra servidor real ficou numa suíte `LiveServer` do próprio alvo de testes, ligada por `SENTINEL_DSN`, e não num alvo separado; ele passa pelo `Transport` com `URLSession` real. A fachada com disco e rede reais foi comprovada pelo teste ponta a ponta no simulador.
 - Decisão (S4, revisão): cada ida ao segundo plano pede o próprio tempo extra, de forma síncrona dentro da notificação; a expiração encerra a tarefa mas não cancela o envio (o envelope continua em disco).
